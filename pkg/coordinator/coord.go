@@ -15,6 +15,7 @@ import (
 
 var (
 	deploymentsResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	podsResource        = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 )
 
 type appCoordinator struct {
@@ -43,6 +44,7 @@ func (c *appCoordinator) Start(stopCh <-chan struct{}) error {
 
 	// setup informers
 	c.setupDeploymentInformer()
+	c.setupPodInformer()
 
 	// start factory
 	c.informerFac.Start(stopCh)
@@ -80,17 +82,12 @@ func (c *appCoordinator) setupDeploymentInformer() {
 				log.Println("unexpected type for object")
 				return
 			}
-			stat, ok, err := unstructured.NestedString(uObj.Object, "status", "conditions", "type")
-			if !ok || err != nil {
-				log.Println("failed to get deployment status:", err)
-				stat = "unknown"
-			}
 			e := api.DeploymentEvent{
-				Type:      api.DeploymentEventNew,
-				Name:      uObj.GetName(),
-				Namespace: uObj.GetNamespace(),
-				Status:    stat,
-				Source:    uObj,
+				Type:          api.DeploymentEventNew,
+				Name:          uObj.GetName(),
+				Namespace:     uObj.GetNamespace(),
+				ReadyReplicas: getReadyReplicas(uObj),
+				Source:        uObj,
 			}
 			c.deployEventFunc(e)
 		}
@@ -113,17 +110,12 @@ func (c *appCoordinator) setupDeploymentInformer() {
 
 			// only trigger if obj different
 			if newResVer != oldResVer {
-				stat, ok, err := unstructured.NestedString(newOne.Object, "status", "conditions", "type")
-				if !ok || err != nil {
-					log.Println("failed to get deployment status:", err)
-					stat = "unknown"
-				}
 				e := api.DeploymentEvent{
-					Type:      api.DeploymentEventUpdate,
-					Name:      newOne.GetName(),
-					Namespace: newOne.GetNamespace(),
-					Status:    stat,
-					Source:    newOne,
+					Type:          api.DeploymentEventUpdate,
+					Name:          newOne.GetName(),
+					Namespace:     newOne.GetNamespace(),
+					ReadyReplicas: getReadyReplicas(newOne),
+					Source:        newOne,
 				}
 				c.deployEventFunc(e)
 			}
@@ -137,17 +129,13 @@ func (c *appCoordinator) setupDeploymentInformer() {
 				log.Println("unexpected type for object")
 				return
 			}
-			stat, ok, err := unstructured.NestedString(uObj.Object, "status", "conditions", "type")
-			if !ok || err != nil {
-				log.Println("failed to get deployment status:", err)
-				stat = "unknown"
-			}
+
 			e := api.DeploymentEvent{
-				Type:      api.DeploymentEventDelete,
-				Name:      uObj.GetName(),
-				Namespace: uObj.GetNamespace(),
-				Status:    stat,
-				Source:    uObj,
+				Type:          api.DeploymentEventDelete,
+				Name:          uObj.GetName(),
+				Namespace:     uObj.GetNamespace(),
+				ReadyReplicas: getReadyReplicas(uObj),
+				Source:        uObj,
 			}
 			c.deployEventFunc(e)
 		}
@@ -157,4 +145,118 @@ func (c *appCoordinator) setupDeploymentInformer() {
 func (c *appCoordinator) OnPodEvent(e api.PodEventFunc) api.Coordinator {
 	c.podEventFunc = e
 	return c
+}
+
+func (c *appCoordinator) setupPodInformer() {
+	ctrl := newController(c.informerFac, podsResource)
+	ctrl.setObjectAddedFunc(func(obj interface{}) {
+		if c.podEventFunc != nil {
+			uObj, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				log.Println("unexpected type for object")
+				return
+			}
+			eType := api.PodEventNew
+			phase := getPodPhase(uObj)
+			if phase == "Running" {
+				eType = api.PodEventRunning
+			}
+			e := api.PodEvent{
+				Type:      eType,
+				Name:      uObj.GetName(),
+				Namespace: uObj.GetNamespace(),
+				HostIP:    getPodHostIP(uObj),
+				PodIP:     getPodIP(uObj),
+			}
+			c.podEventFunc(e)
+		}
+	})
+
+	ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
+		if c.podEventFunc != nil {
+			newOne := new.(*unstructured.Unstructured)
+			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceversion")
+			if err != nil || !ok {
+				log.Println(err)
+				return
+			}
+			oldOne := old.(*unstructured.Unstructured)
+			oldResVer, ok, err := unstructured.NestedString(oldOne.Object, "metadata", "resourceversion")
+			if err != nil || !ok {
+				log.Println(err)
+				return
+			}
+
+			// only trigger if obj different
+			if newResVer != oldResVer {
+				eType := api.PodEventUpdate
+				phase := getPodPhase(newOne)
+				if phase == "Running" {
+					eType = api.PodEventRunning
+				}
+				e := api.PodEvent{
+					Type:      eType,
+					Name:      newOne.GetName(),
+					Namespace: newOne.GetNamespace(),
+					HostIP:    getPodHostIP(newOne),
+					PodIP:     getPodIP(newOne),
+				}
+				c.podEventFunc(e)
+			}
+		}
+	})
+
+	ctrl.setObjectDeletedFunc(func(obj interface{}) {
+		if c.podEventFunc != nil {
+			uObj, ok := obj.(*unstructured.Unstructured)
+			if !ok {
+				log.Println("unexpected type for object")
+				return
+			}
+
+			e := api.PodEvent{
+				Type:      api.PodEventDelete,
+				Name:      uObj.GetName(),
+				Namespace: uObj.GetNamespace(),
+				HostIP:    getPodHostIP(uObj),
+				PodIP:     getPodIP(uObj),
+			}
+			c.podEventFunc(e)
+		}
+	})
+}
+
+func getReadyReplicas(obj *unstructured.Unstructured) int64 {
+	reps, ok, err := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+	if !ok || err != nil {
+		log.Println("failed to get deployment readyRplicas, error:", err)
+	}
+	return reps
+}
+
+func getPodPhase(obj *unstructured.Unstructured) string {
+	phase, ok, err := unstructured.NestedString(obj.Object, "status", "phase")
+	if !ok || err != nil {
+		log.Println("failed to get phase from pod status, error:", err)
+		phase = "unknown"
+	}
+	return phase
+}
+
+func getPodHostIP(obj *unstructured.Unstructured) string {
+	ip, ok, err := unstructured.NestedString(obj.Object, "status", "hostIP")
+	if !ok || err != nil {
+		log.Println("failed to get hostIP from pod status, error:", err)
+		ip = "unknown"
+	}
+	return ip
+}
+
+func getPodIP(obj *unstructured.Unstructured) string {
+	ip, ok, err := unstructured.NestedString(obj.Object, "status", "podIP")
+	if !ok || err != nil {
+		log.Println("failed to get podIP from pod status, error:", err)
+		ip = "unknown"
+	}
+	return ip
 }

@@ -31,8 +31,6 @@ type CoordEvent struct {
 
 type CoordEventFunc func(CoordEvent)
 
-type PodEvent struct{}
-
 type DeploymentEventType int
 
 const (
@@ -43,15 +41,34 @@ const (
 )
 
 type DeploymentEvent struct {
-	Type      DeploymentEventType
+	Type          DeploymentEventType
+	Name          string
+	Namespace     string
+	Port          int64
+	ReadyReplicas int64
+	Source        *unstructured.Unstructured
+}
+
+type PodEventType int
+
+const (
+	PodEventUnknown PodEventType = iota
+	PodEventNew
+	PodEventUpdate
+	PodEventDelete
+	PodEventRunning
+)
+
+type PodEvent struct {
+	Type      PodEventType
 	Name      string
 	Namespace string
-	Port      int64
-	Status    string
-	Source    *unstructured.Unstructured
+	HostIP    string
+	PodIP     string
 }
 
 type PodEventFunc func(PodEvent)
+
 type DeploymentEventFunc func(DeploymentEvent)
 
 type Coordinator interface {
