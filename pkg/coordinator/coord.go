@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
+	restclient "k8s.io/client-go/rest"
 )
 
 var (
@@ -19,6 +20,7 @@ var (
 )
 
 type appCoordinator struct {
+	name            string
 	k8sClient       *k8sClient
 	informer        informers.GenericInformer
 	informerFac     dynamicinformer.DynamicSharedInformerFactory
@@ -27,9 +29,14 @@ type appCoordinator struct {
 	deployEventFunc api.DeploymentEventFunc
 }
 
-func New(k8s *k8sClient) api.Coordinator {
-	// return newCoord(namespace)
-	return nil
+func New(name string, namespace string, config *restclient.Config) (api.Coordinator, error) {
+	client, err := newK8sClient(namespace, config)
+	if err != nil {
+		return nil, err
+	}
+	coord := newCoord(client)
+	coord.name = name
+	return coord, nil
 }
 
 func newCoord(k8s *k8sClient) *appCoordinator {
@@ -86,7 +93,8 @@ func (c *appCoordinator) setupDeploymentInformer() {
 				Type:          api.DeploymentEventNew,
 				Name:          uObj.GetName(),
 				Namespace:     uObj.GetNamespace(),
-				ReadyReplicas: getReadyReplicas(uObj),
+				ReadyReplicas: getDeploymentReplicasField(uObj, "readyReplicas"),
+				Ready:         isDeploymentReady(uObj),
 				Source:        uObj,
 			}
 			c.deployEventFunc(e)
@@ -96,25 +104,25 @@ func (c *appCoordinator) setupDeploymentInformer() {
 	ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
 		if c.deployEventFunc != nil {
 			newOne := new.(*unstructured.Unstructured)
-			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceversion")
+			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceVersion")
 			if err != nil || !ok {
 				log.Println(err)
 				return
 			}
 			oldOne := old.(*unstructured.Unstructured)
-			oldResVer, ok, err := unstructured.NestedString(oldOne.Object, "metadata", "resourceversion")
+			oldResVer, ok, err := unstructured.NestedString(oldOne.Object, "metadata", "resourceVersion")
 			if err != nil || !ok {
 				log.Println(err)
 				return
 			}
 
-			// only trigger if obj different
 			if newResVer != oldResVer {
 				e := api.DeploymentEvent{
 					Type:          api.DeploymentEventUpdate,
 					Name:          newOne.GetName(),
 					Namespace:     newOne.GetNamespace(),
-					ReadyReplicas: getReadyReplicas(newOne),
+					ReadyReplicas: getDeploymentReplicasField(newOne, "readyReplicas"),
+					Ready:         isDeploymentReady(newOne),
 					Source:        newOne,
 				}
 				c.deployEventFunc(e)
@@ -134,7 +142,8 @@ func (c *appCoordinator) setupDeploymentInformer() {
 				Type:          api.DeploymentEventDelete,
 				Name:          uObj.GetName(),
 				Namespace:     uObj.GetNamespace(),
-				ReadyReplicas: getReadyReplicas(uObj),
+				ReadyReplicas: getDeploymentReplicasField(uObj, "readyReplicas"),
+				Ready:         isDeploymentReady(uObj),
 				Source:        uObj,
 			}
 			c.deployEventFunc(e)
@@ -156,17 +165,14 @@ func (c *appCoordinator) setupPodInformer() {
 				log.Println("unexpected type for object")
 				return
 			}
-			eType := api.PodEventNew
 			phase := getPodPhase(uObj)
-			if phase == "Running" {
-				eType = api.PodEventRunning
-			}
 			e := api.PodEvent{
-				Type:      eType,
+				Type:      api.PodEventNew,
 				Name:      uObj.GetName(),
 				Namespace: uObj.GetNamespace(),
 				HostIP:    getPodHostIP(uObj),
 				PodIP:     getPodIP(uObj),
+				Running:   (phase == "Running"),
 			}
 			c.podEventFunc(e)
 		}
@@ -175,13 +181,13 @@ func (c *appCoordinator) setupPodInformer() {
 	ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
 		if c.podEventFunc != nil {
 			newOne := new.(*unstructured.Unstructured)
-			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceversion")
+			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceVersion")
 			if err != nil || !ok {
 				log.Println(err)
 				return
 			}
 			oldOne := old.(*unstructured.Unstructured)
-			oldResVer, ok, err := unstructured.NestedString(oldOne.Object, "metadata", "resourceversion")
+			oldResVer, ok, err := unstructured.NestedString(oldOne.Object, "metadata", "resourceVersion")
 			if err != nil || !ok {
 				log.Println(err)
 				return
@@ -189,17 +195,14 @@ func (c *appCoordinator) setupPodInformer() {
 
 			// only trigger if obj different
 			if newResVer != oldResVer {
-				eType := api.PodEventUpdate
 				phase := getPodPhase(newOne)
-				if phase == "Running" {
-					eType = api.PodEventRunning
-				}
 				e := api.PodEvent{
-					Type:      eType,
+					Type:      api.PodEventUpdate,
 					Name:      newOne.GetName(),
 					Namespace: newOne.GetNamespace(),
 					HostIP:    getPodHostIP(newOne),
 					PodIP:     getPodIP(newOne),
+					Running:   (phase == "Running"),
 				}
 				c.podEventFunc(e)
 			}
@@ -213,25 +216,32 @@ func (c *appCoordinator) setupPodInformer() {
 				log.Println("unexpected type for object")
 				return
 			}
-
+			phase := getPodPhase(uObj)
 			e := api.PodEvent{
 				Type:      api.PodEventDelete,
 				Name:      uObj.GetName(),
 				Namespace: uObj.GetNamespace(),
 				HostIP:    getPodHostIP(uObj),
 				PodIP:     getPodIP(uObj),
+				Running:   (phase == "Running"),
 			}
 			c.podEventFunc(e)
 		}
 	})
 }
 
-func getReadyReplicas(obj *unstructured.Unstructured) int64 {
-	reps, ok, err := unstructured.NestedInt64(obj.Object, "status", "readyReplicas")
+func getDeploymentReplicasField(obj *unstructured.Unstructured, field string) int64 {
+	reps, ok, err := unstructured.NestedInt64(obj.Object, "status", field)
 	if !ok || err != nil {
-		log.Println("failed to get deployment readyRplicas, error:", err)
+		return 0
 	}
 	return reps
+}
+
+func isDeploymentReady(obj *unstructured.Unstructured) bool {
+	requestedReplicas := getDeploymentReplicasField(obj, "replicas")
+	readyReplicas := getDeploymentReplicasField(obj, "readyReplicas")
+	return readyReplicas == requestedReplicas
 }
 
 func getPodPhase(obj *unstructured.Unstructured) string {

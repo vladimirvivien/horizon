@@ -18,7 +18,7 @@ func (c *appCoordinator) Run(param api.RunParam) error {
 
 	// create object
 	cl := c.k8sClient.get()
-	deployment := generateDeployment(param)
+	deployment := c.generateDeployment(param)
 	_, err := cl.Resource(deploymentsResource).Namespace(param.Namespace).Create(deployment, metav1.CreateOptions{})
 	if err != nil {
 		return err
@@ -36,7 +36,7 @@ func assertValidRunParam(param api.RunParam) error {
 	return nil
 }
 
-func generateDeployment(param api.RunParam) *unstructured.Unstructured {
+func (c *appCoordinator) generateDeployment(param api.RunParam) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "apps/v1",
@@ -44,11 +44,29 @@ func generateDeployment(param api.RunParam) *unstructured.Unstructured {
 			"metadata": map[string]interface{}{
 				"name":      param.Name,
 				"namespace": param.Namespace,
+				"labels": map[string]interface{}{
+					"app":         param.Name,
+					"coordinated": "true",
+					"coordinator": c.name,
+				},
 			},
 			"spec": map[string]interface{}{
+				"selector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app":         param.Name,
+						"coordinated": "true",
+						"coordinator": c.name,
+					},
+				},
 				"replicas": param.Replicas,
 				"template": map[string]interface{}{
-					"metadata": map[string]interface{}{},
+					"metadata": map[string]interface{}{
+						"labels": map[string]interface{}{
+							"app":         param.Name,
+							"coordinated": "true",
+							"coordinator": c.name,
+						},
+					},
 
 					"spec": map[string]interface{}{
 						"containers": []interface{}{

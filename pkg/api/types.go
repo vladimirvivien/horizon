@@ -46,6 +46,7 @@ type DeploymentEvent struct {
 	Namespace     string
 	Port          int64
 	ReadyReplicas int64
+	Ready         bool
 	Source        *unstructured.Unstructured
 }
 
@@ -65,6 +66,7 @@ type PodEvent struct {
 	Namespace string
 	HostIP    string
 	PodIP     string
+	Running   bool
 }
 
 type PodEventFunc func(PodEvent)
@@ -77,4 +79,11 @@ type Coordinator interface {
 	OnCoordEvent(CoordEventFunc) Coordinator
 	OnPodEvent(PodEventFunc) Coordinator
 	OnDeploymentEvent(DeploymentEventFunc) Coordinator
+}
+
+type Worker interface {
+	Start(<-chan struct{}) error
+	OnWorkerEvent()
+	OnPeerEvent()
+	OnStorageEvent()
 }
