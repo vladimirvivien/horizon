@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vladimirvivien/horizon/pkg/api"
+	"github.com/vladimirvivien/horizon/pkg/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,8 +34,8 @@ func TestCoordStart(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client := fake.NewSimpleDynamicClient(runtime.NewScheme())
-			coord := newCoord(&k8sClient{clientset: client})
+			fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			coord := newCoord(client.NewFromDynamicClient("", fakeClient))
 
 			coord.OnCoordEvent(test.startFunc)
 
@@ -86,8 +87,8 @@ func TestCoordDeploy(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client := fake.NewSimpleDynamicClient(runtime.NewScheme())
-			coord := newCoord(&k8sClient{clientset: client})
+			fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			coord := newCoord(client.NewFromDynamicClient("", fakeClient))
 
 			stopCh := make(chan struct{})
 			test.coordFunc(stopCh, coord, test.runParam)
@@ -132,9 +133,6 @@ func TestCoordDeploy_WithPodEvent(t *testing.T) {
 					if e.PodIP != "172.17.0.8" {
 						t.Error("unexpected pod ip value:", e.PodIP)
 					}
-					if e.Type != api.PodEventRunning {
-						t.Error("unexpected pod event type:", e.Type)
-					}
 					close(ch)
 				})
 
@@ -155,11 +153,11 @@ func TestCoordDeploy_WithPodEvent(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client := fake.NewSimpleDynamicClient(runtime.NewScheme())
-			coord := newCoord(&k8sClient{clientset: client})
+			fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			coord := newCoord(client.NewFromDynamicClient("", fakeClient))
 
 			stopCh := make(chan struct{})
-			test.coordFunc(stopCh, client, coord, test.runParam)
+			test.coordFunc(stopCh, fakeClient, coord, test.runParam)
 			select {
 			case <-stopCh:
 			case <-ctx.Done():

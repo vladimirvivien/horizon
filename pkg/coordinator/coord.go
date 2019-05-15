@@ -5,7 +5,10 @@ import (
 	"log"
 	"time"
 
+	"github.com/vladimirvivien/horizon/pkg/controller"
+
 	"github.com/vladimirvivien/horizon/pkg/api"
+	"github.com/vladimirvivien/horizon/pkg/client"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -21,7 +24,7 @@ var (
 
 type appCoordinator struct {
 	name            string
-	k8sClient       *k8sClient
+	k8sClient       *client.K8sClient
 	informer        informers.GenericInformer
 	informerFac     dynamicinformer.DynamicSharedInformerFactory
 	coordEventFunc  api.CoordEventFunc
@@ -30,7 +33,7 @@ type appCoordinator struct {
 }
 
 func New(name string, namespace string, config *restclient.Config) (api.Coordinator, error) {
-	client, err := newK8sClient(namespace, config)
+	client, err := client.New(namespace, config)
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +42,8 @@ func New(name string, namespace string, config *restclient.Config) (api.Coordina
 	return coord, nil
 }
 
-func newCoord(k8s *k8sClient) *appCoordinator {
-	factory := dynamicinformer.NewDynamicSharedInformerFactory(k8s.clientset, time.Second*3)
+func newCoord(k8s *client.K8sClient) *appCoordinator {
+	factory := dynamicinformer.NewDynamicSharedInformerFactory(k8s.Interface(), time.Second*3)
 	// 1. setup informer/watcher for cluster wide resources (node, etc)
 	// 2. Register callbacks for cluster events
 	return &appCoordinator{k8sClient: k8s, informerFac: factory}
@@ -81,8 +84,8 @@ func (c *appCoordinator) OnDeploymentEvent(e api.DeploymentEventFunc) api.Coordi
 }
 
 func (c *appCoordinator) setupDeploymentInformer() {
-	ctrl := newController(c.informerFac, deploymentsResource)
-	ctrl.setObjectAddedFunc(func(obj interface{}) {
+	ctrl := controller.New(c.informerFac, deploymentsResource)
+	ctrl.SetObjectAddedFunc(func(obj interface{}) {
 		if c.deployEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
 			if !ok {
@@ -101,7 +104,7 @@ func (c *appCoordinator) setupDeploymentInformer() {
 		}
 	})
 
-	ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
+	ctrl.SetObjectUpdatedFunc(func(old, new interface{}) {
 		if c.deployEventFunc != nil {
 			newOne := new.(*unstructured.Unstructured)
 			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceVersion")
@@ -130,7 +133,7 @@ func (c *appCoordinator) setupDeploymentInformer() {
 		}
 	})
 
-	ctrl.setObjectDeletedFunc(func(obj interface{}) {
+	ctrl.SetObjectDeletedFunc(func(obj interface{}) {
 		if c.deployEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
 			if !ok {
@@ -157,8 +160,8 @@ func (c *appCoordinator) OnPodEvent(e api.PodEventFunc) api.Coordinator {
 }
 
 func (c *appCoordinator) setupPodInformer() {
-	ctrl := newController(c.informerFac, podsResource)
-	ctrl.setObjectAddedFunc(func(obj interface{}) {
+	ctrl := controller.New(c.informerFac, podsResource)
+	ctrl.SetObjectAddedFunc(func(obj interface{}) {
 		if c.podEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
 			if !ok {
@@ -178,7 +181,7 @@ func (c *appCoordinator) setupPodInformer() {
 		}
 	})
 
-	ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
+	ctrl.SetObjectUpdatedFunc(func(old, new interface{}) {
 		if c.podEventFunc != nil {
 			newOne := new.(*unstructured.Unstructured)
 			newResVer, ok, err := unstructured.NestedString(newOne.Object, "metadata", "resourceVersion")
@@ -209,7 +212,7 @@ func (c *appCoordinator) setupPodInformer() {
 		}
 	})
 
-	ctrl.setObjectDeletedFunc(func(obj interface{}) {
+	ctrl.SetObjectDeletedFunc(func(obj interface{}) {
 		if c.podEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
 			if !ok {

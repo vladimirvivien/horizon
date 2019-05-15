@@ -1,4 +1,4 @@
-package coordinator
+package controller
 
 import (
 	"context"
@@ -15,19 +15,33 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 )
 
+func NewUnstructuredTestObj(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": apiVersion,
+			"kind":       kind,
+			"metadata": map[string]interface{}{
+				"namespace": namespace,
+				"name":      name,
+			},
+			"spec": name,
+		},
+	}
+}
+
 func TestCoordController(t *testing.T) {
 	tests := []struct {
 		name      string
-		ctrlFunc  func(dynamicinformer.DynamicSharedInformerFactory, schema.GroupVersionResource, chan *unstructured.Unstructured) *controller
+		ctrlFunc  func(dynamicinformer.DynamicSharedInformerFactory, schema.GroupVersionResource, chan *unstructured.Unstructured) *Controller
 		eventFunc func(schema.GroupVersionResource, *fake.FakeDynamicClient) *unstructured.Unstructured
 		grv       schema.GroupVersionResource
 	}{
 		{
 			name: "objectAdded event",
 			grv:  schema.GroupVersionResource{Group: "extensions", Version: "v1beta1", Resource: "deployments"},
-			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *controller {
-				ctrl := newController(fac, grv)
-				ctrl.setObjectAddedFunc(func(obj interface{}) {
+			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *Controller {
+				ctrl := New(fac, grv)
+				ctrl.SetObjectAddedFunc(func(obj interface{}) {
 					objChan <- obj.(*unstructured.Unstructured)
 				})
 				if ctrl.handlerFuncs.AddFunc == nil {
@@ -36,7 +50,7 @@ func TestCoordController(t *testing.T) {
 				return ctrl
 			},
 			eventFunc: func(grv schema.GroupVersionResource, client *fake.FakeDynamicClient) *unstructured.Unstructured {
-				testObject := newUnstructuredObj("extensions/v1beta1", "Deployment", "test-ns", "test-name")
+				testObject := NewUnstructuredTestObj("extensions/v1beta1", "Deployment", "test-ns", "test-name")
 				createdObj, err := client.Resource(grv).Namespace("test-ns").Create(testObject, metav1.CreateOptions{})
 				if err != nil {
 					t.Error(err)
@@ -47,9 +61,9 @@ func TestCoordController(t *testing.T) {
 		{
 			name: "objectUpdated event",
 			grv:  schema.GroupVersionResource{Group: "group", Version: "ver1", Resource: "fooobjs"},
-			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *controller {
-				ctrl := newController(fac, grv)
-				ctrl.setObjectUpdatedFunc(func(old, new interface{}) {
+			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *Controller {
+				ctrl := New(fac, grv)
+				ctrl.SetObjectUpdatedFunc(func(old, new interface{}) {
 					objChan <- new.(*unstructured.Unstructured)
 				})
 				if ctrl.handlerFuncs.UpdateFunc == nil {
@@ -58,7 +72,7 @@ func TestCoordController(t *testing.T) {
 				return ctrl
 			},
 			eventFunc: func(grv schema.GroupVersionResource, client *fake.FakeDynamicClient) *unstructured.Unstructured {
-				testObject := newUnstructuredObj("group/v1", "FooObj", "test-ns", "test-name")
+				testObject := NewUnstructuredTestObj("group/v1", "FooObj", "test-ns", "test-name")
 				createdObj, err := client.Resource(grv).Namespace("test-ns").Create(testObject, metav1.CreateOptions{})
 				if err != nil {
 					t.Error(err)
@@ -72,9 +86,9 @@ func TestCoordController(t *testing.T) {
 		{
 			name: "objectDeleted event",
 			grv:  schema.GroupVersionResource{Group: "group2", Version: "v2beta1", Resource: "barobjs"},
-			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *controller {
-				ctrl := newController(fac, grv)
-				ctrl.setObjectDeletedFunc(func(obj interface{}) {
+			ctrlFunc: func(fac dynamicinformer.DynamicSharedInformerFactory, grv schema.GroupVersionResource, objChan chan *unstructured.Unstructured) *Controller {
+				ctrl := New(fac, grv)
+				ctrl.SetObjectDeletedFunc(func(obj interface{}) {
 					objChan <- obj.(*unstructured.Unstructured)
 				})
 				if ctrl.handlerFuncs.DeleteFunc == nil {
@@ -83,7 +97,7 @@ func TestCoordController(t *testing.T) {
 				return ctrl
 			},
 			eventFunc: func(grv schema.GroupVersionResource, client *fake.FakeDynamicClient) *unstructured.Unstructured {
-				testObject := newUnstructuredObj("group2/v2beta1", "BarObj", "test-ns", "test-name")
+				testObject := NewUnstructuredTestObj("group2/v2beta1", "BarObj", "test-ns", "test-name")
 				createdObj, err := client.Resource(grv).Namespace("test-ns").Create(testObject, metav1.CreateOptions{})
 				if err != nil {
 					t.Error(err)

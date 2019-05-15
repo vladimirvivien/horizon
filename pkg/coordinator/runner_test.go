@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/vladimirvivien/horizon/pkg/api"
+	"github.com/vladimirvivien/horizon/pkg/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,9 +34,9 @@ func TestRunner(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			client := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			fakeClient := fake.NewSimpleDynamicClient(runtime.NewScheme())
 
-			coord := newCoord(&k8sClient{clientset: client})
+			coord := newCoord(client.NewFromDynamicClient("", fakeClient))
 			if err := coord.Start(ctx.Done()); err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +46,7 @@ func TestRunner(t *testing.T) {
 			}
 
 			// validate creation
-			savedObj, err := client.Resource(deploymentsResource).Namespace(test.param.Namespace).Get(test.param.Name, metav1.GetOptions{})
+			savedObj, err := fakeClient.Resource(deploymentsResource).Namespace(test.param.Namespace).Get(test.param.Name, metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -17,7 +17,7 @@ func (c *appCoordinator) Run(param api.RunParam) error {
 	}
 
 	// create object
-	cl := c.k8sClient.get()
+	cl := c.k8sClient.Interface()
 	deployment := c.generateDeployment(param)
 	_, err := cl.Resource(deploymentsResource).Namespace(param.Namespace).Create(deployment, metav1.CreateOptions{})
 	if err != nil {
