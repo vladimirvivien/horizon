@@ -20,13 +20,15 @@ func main() {
 	flag.StringVar(&kubeconfig, "kubeconfig", kubeconfig, "kubeconfig file")
 	flag.Parse()
 
+	stopCh := make(chan struct{})
+
 	log.Println("Using kubeconfig: ", kubeconfig)
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	// setup a coodinator
+	// setup the coodinator
 	coord, err := coordinator.New("coord-nginx", ns, config)
 	if err != nil {
 		log.Fatalf("failed to start coordinator: %s", err)
@@ -39,13 +41,12 @@ func main() {
 			log.Printf("Deployment \"%s\" received\n", e.Name)
 		case api.DeploymentEventUpdate:
 			if e.Ready {
-				log.Printf("Deployment \"%s\" ready\n", e.Name)
+				log.Printf("Deployment \"%s\" ready!\n", e.Name)
 			}
 		}
 	})
 
 	//  start coordinator
-	stopCh := make(chan struct{})
 	if err := coord.Start(stopCh); err != nil {
 		log.Fatal(err)
 	}
@@ -54,8 +55,6 @@ func main() {
 	if err := coord.Run(api.RunParam{Name: image, Namespace: ns, Image: image}); err != nil {
 		log.Fatal(err)
 	}
-
-	log.Printf("Requested to deploy image %s successfully!\n", image)
 
 	select {
 	case <-stopCh:
