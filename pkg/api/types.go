@@ -2,6 +2,12 @@ package api
 
 import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+var (
+	DeploymentsResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	PodsResource        = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 )
 
 type RunParam struct {
@@ -81,9 +87,22 @@ type Coordinator interface {
 	OnDeploymentEvent(DeploymentEventFunc) Coordinator
 }
 
+type WorkerEventType int
+
+const (
+	WorkerEventUnknown WorkerEventType = iota
+	WorkerEventStart
+	WorkerEventStop
+)
+
+type WorkerEvent struct {
+	Type WorkerEventType
+}
+type WorkerEventFunc func(WorkerEvent)
+
 type Worker interface {
 	Start(<-chan struct{}) error
-	OnWorkerEvent()
-	OnPeerEvent()
-	OnStorageEvent()
+	OnWorkerEvent(WorkerEventFunc) Worker
+	//OnPeerEvent()
+	//OnStorageEvent()
 }

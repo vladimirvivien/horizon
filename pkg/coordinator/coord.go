@@ -5,21 +5,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/vladimirvivien/horizon/pkg/controller"
-
 	"github.com/vladimirvivien/horizon/pkg/api"
 	"github.com/vladimirvivien/horizon/pkg/client"
+	"github.com/vladimirvivien/horizon/pkg/controller"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/informers"
 	restclient "k8s.io/client-go/rest"
-)
-
-var (
-	deploymentsResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
-	podsResource        = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
 )
 
 type appCoordinator struct {
@@ -62,8 +55,12 @@ func (c *appCoordinator) Start(stopCh <-chan struct{}) error {
 	syncMap := c.informerFac.WaitForCacheSync(stopCh)
 
 	// validate all resources are sync'd
-	if !syncMap[deploymentsResource] {
-		return fmt.Errorf("failed to sync resource %s", deploymentsResource)
+	if !syncMap[api.DeploymentsResource] {
+		return fmt.Errorf("failed to sync resource %s", api.DeploymentsResource)
+	}
+
+	if !syncMap[api.PodsResource] {
+		return fmt.Errorf("failed to sync resource %s", api.PodsResource)
 	}
 
 	if c.coordEventFunc != nil {
@@ -84,7 +81,7 @@ func (c *appCoordinator) OnDeploymentEvent(e api.DeploymentEventFunc) api.Coordi
 }
 
 func (c *appCoordinator) setupDeploymentInformer() {
-	ctrl := controller.New(c.informerFac, deploymentsResource)
+	ctrl := controller.New(c.informerFac, api.DeploymentsResource)
 	ctrl.SetObjectAddedFunc(func(obj interface{}) {
 		if c.deployEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
@@ -160,7 +157,7 @@ func (c *appCoordinator) OnPodEvent(e api.PodEventFunc) api.Coordinator {
 }
 
 func (c *appCoordinator) setupPodInformer() {
-	ctrl := controller.New(c.informerFac, podsResource)
+	ctrl := controller.New(c.informerFac, api.PodsResource)
 	ctrl.SetObjectAddedFunc(func(obj interface{}) {
 		if c.podEventFunc != nil {
 			uObj, ok := obj.(*unstructured.Unstructured)
@@ -168,14 +165,10 @@ func (c *appCoordinator) setupPodInformer() {
 				log.Println("unexpected type for object")
 				return
 			}
-			phase := getPodPhase(uObj)
 			e := api.PodEvent{
 				Type:      api.PodEventNew,
 				Name:      uObj.GetName(),
 				Namespace: uObj.GetNamespace(),
-				HostIP:    getPodHostIP(uObj),
-				PodIP:     getPodIP(uObj),
-				Running:   (phase == "Running"),
 			}
 			c.podEventFunc(e)
 		}
@@ -199,13 +192,17 @@ func (c *appCoordinator) setupPodInformer() {
 			// only trigger if obj different
 			if newResVer != oldResVer {
 				phase := getPodPhase(newOne)
+				running := (phase == "Running")
 				e := api.PodEvent{
 					Type:      api.PodEventUpdate,
 					Name:      newOne.GetName(),
 					Namespace: newOne.GetNamespace(),
-					HostIP:    getPodHostIP(newOne),
-					PodIP:     getPodIP(newOne),
-					Running:   (phase == "Running"),
+				}
+				if running {
+					log.Printf("Pod %s is running\n", e.Name)
+					e.HostIP = getPodHostIP(newOne)
+					e.PodIP = getPodIP(newOne)
+					e.Running = running
 				}
 				c.podEventFunc(e)
 			}

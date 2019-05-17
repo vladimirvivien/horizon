@@ -46,7 +46,7 @@ spec:
       containers:
       - image: supervisor:latest
         args:
-          - "--worker-image=nginx"
+          - "--worker-image=worker:latest"
           - "--namespace=default"
         imagePullPolicy: Never
         name: super

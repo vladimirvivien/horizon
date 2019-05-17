@@ -19,7 +19,7 @@ func (c *appCoordinator) Run(param api.RunParam) error {
 	// create object
 	cl := c.k8sClient.Interface()
 	deployment := c.generateDeployment(param)
-	_, err := cl.Resource(deploymentsResource).Namespace(param.Namespace).Create(deployment, metav1.CreateOptions{})
+	_, err := cl.Resource(api.DeploymentsResource).Namespace(param.Namespace).Create(deployment, metav1.CreateOptions{})
 	if err != nil {
 		return err
 	}
@@ -74,6 +74,13 @@ func (c *appCoordinator) generateDeployment(param api.RunParam) *unstructured.Un
 								"name":            param.Name,
 								"image":           param.Image,
 								"imagePullPolicy": "IfNotPresent",
+								"ports": []interface{}{
+									map[string]interface{}{
+										"name":          "api",
+										"protocol":      "TCP",
+										"containerPort": param.Port,
+									},
+								},
 							},
 						},
 					},

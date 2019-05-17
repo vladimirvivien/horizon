@@ -1,4 +1,3 @@
-#FROM gcr.io/distroless/base
-FROM alpine
+FROM gcr.io/distroless/base
 COPY ./supervisor /supervisor
 ENTRYPOINT ["/supervisor"]

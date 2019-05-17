@@ -2,7 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 
 	"github.com/vladimirvivien/horizon/pkg/api"
 	"github.com/vladimirvivien/horizon/pkg/coordinator"
@@ -13,7 +16,7 @@ import (
 func main() {
 	var kubeconfig, ns, image string
 	flag.StringVar(&ns, "namespace", "default", "namespace")
-	flag.StringVar(&image, "worker-image", image, "container image for worker process")
+	flag.StringVar(&image, "worker-image", "worker:latest", "container image for worker process")
 	flag.StringVar(&kubeconfig, "kubeconfig", kubeconfig, "kubeconfig file")
 	flag.Parse()
 
@@ -37,9 +40,9 @@ func main() {
 	}
 
 	// setup the coodinator
-	coord, err := coordinator.New("coordinator", ns, config)
+	coord, err := coordinator.New("greeter-supervisor", ns, config)
 	if err != nil {
-		log.Fatalf("failed to start coordinator: %s", err)
+		log.Fatalf("failed to start greeter-supervisor: %s", err)
 	}
 
 	// describe callback
@@ -54,13 +57,39 @@ func main() {
 		}
 	})
 
+	coord.OnPodEvent(func(e api.PodEvent) {
+		log.Println("Rcvd pod event")
+		if e.Running {
+			addr := e.PodIP
+			res, err := http.Get(fmt.Sprintf("http://%s:%d/", addr, e.Port))
+			if err != nil {
+				log.Println("unable to connect to worker process:", err)
+				return
+			}
+			msg, err := ioutil.ReadAll(res.Body)
+			defer res.Body.Close()
+			if err != nil {
+				log.Println("failed to read message from worker:", err)
+				return
+			}
+			log.Println(msg)
+		}
+	})
+
 	//  start coordinator
 	if err := coord.Start(stopCh); err != nil {
 		log.Fatal(err)
 	}
 
 	// apply an operation
-	if err := coord.Run(api.RunParam{Name: image, Namespace: ns, Image: image}); err != nil {
+	if err := coord.Run(api.RunParam{
+		Replicas:        1,
+		Name:            "worker",
+		Namespace:       ns,
+		Image:           image,
+		Port:            8086,
+		ImagePullPolicy: "Never",
+	}); err != nil {
 		log.Fatal(err)
 	}
 
